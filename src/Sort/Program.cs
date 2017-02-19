@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.Linq;
 
 namespace Sort
@@ -9,102 +10,80 @@ namespace Sort
     {
         private static void Main()
         {
-            const int count = 3000000;
+            //const int length = 13000000;
+            const int length = 30000000;
 
-            var random = new Random();
+            var data1 = Enumerable.Range(0, length).Reverse().Select(x => (x % 2 == 0 ? -1 : 1) * x).ToArray();
+            var data2 = Enumerable.Range(0, length).Reverse().Select(x => (x % 2 == 0 ? -1 : 1) * x).ToArray();
+            var data3 = Enumerable.Range(0, length).Reverse().Select(x => (x % 2 == 0 ? -1 : 1) * x).ToArray();
 
-            var data1 = Enumerable.Range(0, count).Reverse().Select(x => (random.NextDouble() > 0.5 ? -1 : 1) * x).ToArray();
-            var data2 = Enumerable.Range(0, count).Reverse().Select(x => (random.NextDouble() > 0.5 ? -1 : 1) * x).ToArray();
-            var data3 = Enumerable.Range(0, count).Reverse().Select(x => (random.NextDouble() > 0.5 ? -1 : 1) * x).ToArray();
-
-            Measure(() => Array.Sort(data1),      "Quick Sort => A");
-            Measure(() => RadixSort.Sort1(data2), "Radix Sort => B");
-            Measure(() => RadixSort.Sort2(data3), "Radix Sort => C");
-
-            Console.WriteLine();
-            Console.WriteLine(string.Join(", ", data1.Take(8)));
-            Console.WriteLine(string.Join(", ", data2.Take(8)));
-            Console.WriteLine(string.Join(", ", data3.Take(8)));
+            Measure(() => SortCpu.Compute1(data1), false, length, "CPU: Library!");
+            Measure(() => SortCpu.Compute2(data2), false, length, "CPU: Parallel Linq!");
+            Measure(() => SortCpu.Compute3(data3), false, length, "CPU: Custom!");
 
             Console.ReadLine();
         }
 
-        private static void Measure(Action action, string message)
+        private static void Measure(Func<IEnumerable<int>> func, bool isGpu, int length, string description)
         {
-            var sw = Stopwatch.StartNew();
-            action();
-            Console.WriteLine("{0} {1} ms", message, sw.ElapsedMilliseconds);
-        }
-    }
+            const string format = "{0,9}";
 
-    internal static class RadixSort
-    {
-        private const int Radix = 10;
+            Func<Stopwatch, string> formatElapsedTime = w => w.Elapsed.TotalSeconds >= 1
+                ? string.Format(CultureInfo.InvariantCulture, format + "  (s)", w.Elapsed.TotalSeconds)
+                : w.Elapsed.TotalMilliseconds >= 1
+                    ? string.Format(CultureInfo.InvariantCulture, format + " (ms)", w.Elapsed.TotalMilliseconds)
+                    : string.Format(CultureInfo.InvariantCulture, format + " (μs)", w.Elapsed.TotalMilliseconds * 1000);
 
-        public static void Sort1(int[] data)
-        {
-            var buckets = Enumerable.Range(0, Radix).Select(x => new List<int>()).ToArray();
-            var maxDigits = data.Max(x => Math.Floor(Math.Log10(x) + 1));
-            var radix = 1;
-
-            for (int i = 0; i < maxDigits; i++)
+            Action<bool> consoleColor = error =>
             {
-                radix *= Radix;
-                var w = radix / Radix;
-
-                foreach (var item in data)
+                if (error)
                 {
-                    var bucket = Math.Abs(item % radix / w);
-                    buckets[bucket].Add(item);
+                    Console.BackgroundColor = ConsoleColor.Red;
+                    Console.ForegroundColor = ConsoleColor.Black;
+                    return;
                 }
 
-                var index = 0;
+                Console.ForegroundColor = isGpu
+                    ? ConsoleColor.White
+                    : ConsoleColor.Cyan;
+            };
 
-                foreach (var bucket in buckets)
-                {
-                    foreach (var item in bucket)
-                    {
-                        data[index++] = item;
-                    }
-                }
+            Func<Stopwatch, string> bandwidth = w => string.Format(CultureInfo.InvariantCulture, "{0,8:F4} GB/s", length * sizeof(int) / (w.Elapsed.TotalMilliseconds * 1000000));
 
-                foreach (var bucket in buckets)
-                {
-                    bucket.Clear();
-                }
-            }
+            var sw1 = Stopwatch.StartNew();
+            var result1 = func();
+            sw1.Stop();
+
+            Console.WriteLine(new string('-', 49));
+            Console.WriteLine(description);
+            consoleColor(!IsValid(result1, 100));
+            Console.WriteLine("{0,9} - {1} - {2} [Cold]", string.Join(", ", result1.Take(5)), formatElapsedTime(sw1), bandwidth(sw1));
+            Console.ResetColor();
+
+            var sw2 = Stopwatch.StartNew();
+            var result2 = func();
+            sw2.Stop();
+            consoleColor(!IsValid(result2, 100));
+            Console.WriteLine("{0,9} - {1} - {2} [Warm]", string.Join(", ", result2.Take(5)), formatElapsedTime(sw2), bandwidth(sw2));
+            Console.ResetColor();
         }
 
-        public static void Sort2(int[] data)
+        private static bool IsValid(IEnumerable<int> source, int length)
         {
-            int[] tmp = new int[data.Length];
-            var maxDigits = -1;
+            var segment = source.Take(length).ToList();
 
-            for (int shift = 31; shift > -1; --shift)
+            for (var i = 0; i < segment.Count - 1; i++)
             {
-                var j = 0;
+                var a = segment[i + 0];
+                var b = segment[i + 1];
 
-                for (var i = 0; i < data.Length; ++i)
+                if (a > b)
                 {
-                    if (shift == 31)
-                    {
-                        maxDigits = (int)Math.Max(maxDigits, Math.Floor(Math.Log10(data[i]) + 1));
-                    }
-
-                    bool move = data[i] << shift >= 0;
-
-                    if (shift == 0 ? !move : move)
-                    {
-                        data[i - j] = data[i];
-                    }
-                    else
-                    {
-                        tmp[j++] = data[i];
-                    }
+                    return false;
                 }
-
-                Array.Copy(tmp, 0, data, data.Length - j, j);
             }
+
+            return true;
         }
     }
 }
