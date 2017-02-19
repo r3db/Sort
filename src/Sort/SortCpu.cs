@@ -100,7 +100,7 @@ namespace Sort
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void Exchange<T>(T[] array, int i, int j)
         {
-            T temp = array[i];
+            var temp = array[i];
             array[i] = array[j];
             array[j] = temp;
         }
